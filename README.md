@@ -1,0 +1,1 @@
+This project implements a 2D finite element analysis using a 4-node quadrilateral element. It reads node, element, and boundary condition data from a file, then calculates the derivatives of shape functions, Jacobian matrix, and stiffness matrix (H). The program uses NumPy for matrix operations and is designed for structural analysis simulations.
