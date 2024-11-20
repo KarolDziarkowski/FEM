@@ -1,5 +1,6 @@
+import mat
 import numpy as np
-import math as mat
+import math
 
 
 class Elem4:
@@ -7,7 +8,7 @@ class Elem4:
     x = np.array([0.0, 0.025, 0.025, 0.0])
     y = np.array([0.0, 0.0, 0.025, 0.025])
 
-    n = 1 / mat.sqrt(3)
+    n = 1 / math.sqrt(3)
     pcE = np.array([-n, n, n, -n])
     pcN = np.array([-n, -n, n, n])
 
@@ -21,6 +22,62 @@ class Elem4:
     jakob = np.zeros((4, 2, 2))
     jakob_odwr = np.zeros((4, 2, 2))
     suma_H = np.zeros((4, 4))
+
+    nodes = []
+    elements = []
+    bc = []
+
+    @staticmethod
+    def read_data(file_path):
+        with open(file_path, 'r') as file:
+            lines = file.readlines()
+
+        # Przetwarzanie węzłów
+        nodes_start = False
+        elements_start = False
+        bc_start = False
+
+        for line in lines:
+            line = line.strip()
+
+            # Pomijanie pustych linii
+            if not line:
+                continue
+
+            if line == '*Node':  # Wskazuje początek sekcji węzłów
+                nodes_start = True
+                continue
+            elif line == '*Element, type=DC2D4':  # Wskazuje początek sekcji elementów
+                elements_start = True
+                continue
+            elif line == '*BC':  # Wskazuje początek sekcji warunków brzegowych
+                bc_start = True
+                continue
+
+            # Jeśli znajdujemy się w sekcji węzłów
+            if nodes_start and not elements_start and not bc_start:
+                parts = line.split(',')
+                if len(parts) == 3:  # Sprawdzanie, czy linia ma odpowiednią liczbę elementów
+                    node_id = int(parts[0].strip())
+                    x = float(parts[1].strip())
+                    y = float(parts[2].strip())
+                    Elem4.nodes.append([node_id, x, y])
+
+            # Jeśli znajdujemy się w sekcji elementów
+            elif elements_start and not bc_start:
+                parts = line.split(',')
+                if len(parts) >= 5:  # Elementy mają przynajmniej 5 części: id i 4 numery węzłów
+                    element_id = int(parts[0].strip())
+                    node_ids = list(map(int, parts[1:]))
+                    Elem4.elements.append([element_id] + node_ids)
+
+            # Jeśli znajdujemy się w sekcji warunków brzegowych
+            elif bc_start:
+                parts = line.split(',')
+                bc_nodes = list(map(int, parts))
+                Elem4.bc.extend(bc_nodes)
+
+    # Pozostałe metody jak poprzednio...
 
     @staticmethod
     def pochodne():
@@ -103,8 +160,19 @@ class Elem4:
 
         print("\nMacierz H po sumowaniu:\n", Elem4.suma_H)
 
+# Przykład użycia klasy Elem4
 
 element1 = Elem4()
+file_path = './Test1_4_4.txt'  # Plik tekstowy z danymi
+# Wczytaj dane z pliku
+element1.read_data(file_path)
+
+# Sprawdzenie wczytanych danych
+print("Węzły:", Elem4.nodes)
+print("Elementy:", Elem4.elements)
+print("Warunki brzegowe:", Elem4.bc)
+
+# Obliczenia na podstawie wczytanych danych
 element1.pochodne()
 element1.jakobian()
 element1.pochodne2()
