@@ -1,179 +1,152 @@
-import mat
-import numpy as np
-import math
+from Classes import Node, Element, Global, Grid
+from MacierzH import MatrixH, no_integration_nodes
+from WektorP import MacierzHBC, WektorP
+from Agregacja import MacierzHGlobalna, WektorPGlobalny, sum_matrices, sum_vectors
+from GaussianElimination import gaussian_elimination
 
 
-class Elem4:
-    l_elem = 4
-    x = np.array([0.0, 0.025, 0.025, 0.0])
-    y = np.array([0.0, 0.0, 0.025, 0.025])
+data = {}
+nodes = {}
+elements = []
+node_section = False
+element_section = False
+bc_section = False
+h_matrices = []
+bc_nodes = set()
+hbc_matrices = []
+summed_matrices = []
+p_vectors = []
+c_matrices = []
 
-    n = 1 / math.sqrt(3)
-    pcE = np.array([-n, n, n, -n])
-    pcN = np.array([-n, -n, n, n])
+#plik = "Test1_4_4.txt"
+plik = "Test2_4_4_MixGrid.txt"
 
-    dNdN = np.zeros((4, 4))
-    dNdE = np.zeros((4, 4))
-    dNdX = np.zeros((4, 4))
-    dNdY = np.zeros((4, 4))
+with open(plik, "r") as file:
+    for line in file:
+        line = line.strip()
 
-    detJ = np.zeros(4)
+        if line.startswith("*Node"):
+            node_section = True
+            element_section = False
+            bc_section = False
+            continue
 
-    jakob = np.zeros((4, 2, 2))
-    jakob_odwr = np.zeros((4, 2, 2))
-    suma_H = np.zeros((4, 4))
+        elif line.startswith("*Element"):
+            element_section = True
+            node_section = False
+            bc_section = False
+            continue
 
-    nodes = []
-    elements = []
-    bc = []
+        elif line.startswith("*"):
+            node_section = False
+            element_section = False
 
-    @staticmethod
-    def read_data(file_path):
-        with open(file_path, 'r') as file:
-            lines = file.readlines()
+        if node_section:
+            parts = line.split(',')
+            if len(parts) == 3:
+                node_id, x, y = [int(parts[0]), float(parts[1]), float(parts[2])]
+                node = Node(node_id, x, y)
+                nodes[node_id] = node
 
-        # Przetwarzanie węzłów
-        nodes_start = False
-        elements_start = False
-        bc_start = False
+        if element_section:
+            if line:
+                element_id, *element_nodes = map(int, line.split(','))
+                element = Element(element_id)
 
-        for line in lines:
-            line = line.strip()
+                # Find Node objects corresponding to the IDs
+                nodes_in_element = [nodes[node_id] for node_id in element_nodes]
 
-            # Pomijanie pustych linii
-            if not line:
-                continue
+                # Add Node objects to the element
+                for node in nodes_in_element:
+                    element.addNode(node)
 
-            if line == '*Node':  # Wskazuje początek sekcji węzłów
-                nodes_start = True
-                continue
-            elif line == '*Element, type=DC2D4':  # Wskazuje początek sekcji elementów
-                elements_start = True
-                continue
-            elif line == '*BC':  # Wskazuje początek sekcji warunków brzegowych
-                bc_start = True
-                continue
+                elements.append(element)
 
-            # Jeśli znajdujemy się w sekcji węzłów
-            if nodes_start and not elements_start and not bc_start:
-                parts = line.split(',')
-                if len(parts) == 3:  # Sprawdzanie, czy linia ma odpowiednią liczbę elementów
-                    node_id = int(parts[0].strip())
-                    x = float(parts[1].strip())
-                    y = float(parts[2].strip())
-                    Elem4.nodes.append([node_id, x, y])
+        parts = line.split()
+        if len(parts) < 3:
+            key = parts[0]
+            value = parts[1] if len(parts) > 1 else ""
+            data[key] = value
+        else:
+            key = parts[0] + " " + parts[1]
+            value = parts[2]
+            data[key] = value
 
-            # Jeśli znajdujemy się w sekcji elementów
-            elif elements_start and not bc_start:
-                parts = line.split(',')
-                if len(parts) >= 5:  # Elementy mają przynajmniej 5 części: id i 4 numery węzłów
-                    element_id = int(parts[0].strip())
-                    node_ids = list(map(int, parts[1:]))
-                    Elem4.elements.append([element_id] + node_ids)
+# Process BC section after creating Node objects
+with open(plik, "r") as file:
+    for line in file:
+        line = line.strip()
 
-            # Jeśli znajdujemy się w sekcji warunków brzegowych
-            elif bc_start:
-                parts = line.split(',')
-                bc_nodes = list(map(int, parts))
-                Elem4.bc.extend(bc_nodes)
+        if line.startswith("*BC"):
+            bc_section = True
+            node_section = False
+            element_section = False
+            continue
 
-    # Pozostałe metody jak poprzednio...
+        if bc_section:
+            if line:
+                bc_nodes.update(map(int, line.split(',')))
 
-    @staticmethod
-    def pochodne():
-        for x in range(Elem4.l_elem):
-            wsp = 0.25
-            Elem4.dNdE[x, 0] = wsp * (1 - Elem4.pcN[x])
-            Elem4.dNdE[x, 1] = -wsp * (1 - Elem4.pcN[x])
-            Elem4.dNdE[x, 2] = -wsp * (1 + Elem4.pcN[x])
-            Elem4.dNdE[x, 3] = wsp * (1 + Elem4.pcN[x])
+# Modify existing Node objects based on BC information
+for node_id in bc_nodes:
+    if node_id in nodes:
+        nodes[node_id].BC = 1
 
-            Elem4.dNdN[x, 0] = wsp * (1 - Elem4.pcE[x])
-            Elem4.dNdN[x, 1] = wsp * (1 + Elem4.pcE[x])
-            Elem4.dNdN[x, 2] = -wsp * (1 + Elem4.pcE[x])
-            Elem4.dNdN[x, 3] = -wsp * (1 - Elem4.pcE[x])
+global_data = Global(
+    simTime=int(data.get('SimulationTime', 0)),
+    simStepTime=int(data.get('SimulationStepTime', 0)),
+    conductivity=int(data.get('Conductivity', 0)),
+    alfa=int(data.get('Alfa', 0)),
+    tot=int(data.get('Tot', 0)),
+    initialTemp=int(data.get('InitialTemp', 0)),
+    density=int(data.get('Density', 0)),
+    specificHeat=int(data.get('SpecificHeat', 0)),
+    nodesNo=int(data.get('Nodes number', 0)),
+    elementsNo=int(data.get('Elements number', 0))
+)
+global_data.print_values()
 
-        print("Pochodne funkcji kształtu dNdE:\n", Elem4.dNdE)
-        print("Pochodne funkcji kształtu dNdN:\n", Elem4.dNdN)
+grid = Grid(global_data.nodesNo, global_data.elementsNo)
+for node in nodes.values():
+    grid.addNode(node)
 
-    @staticmethod
-    def jakobian():
-        dXdE = 0.0
-        dYdE = 0.0
-        dXdN = 0.0
-        dYdN = 0.0
+for element in elements:
+    #element.printElement()
+    grid.addElement(element)
 
-        for x in range(Elem4.l_elem):
-            for y in range(4):
-                dXdE += Elem4.dNdE[x, y] * -Elem4.x[y]
-                dXdN += Elem4.dNdN[x, y] * -Elem4.x[y]
-                dYdE += Elem4.dNdE[x, y] * -Elem4.y[y]
-                dYdN += Elem4.dNdN[x, y] * -Elem4.y[y]
-            Elem4.jakob[x, 0, 0] = dXdE
-            Elem4.jakob[x, 0, 1] = dXdN
-            Elem4.jakob[x, 1, 0] = dYdE
-            Elem4.jakob[x, 1, 1] = dYdN
-            dXdE = 0.0
-            dXdN = 0.0
-            dYdE = 0.0
-            dYdN = 0.0
+    temp_h = MatrixH(element, no_integration_nodes, global_data.conductivity)
+    #temp_h.print_total_matrix()
+    h_matrices.append(temp_h)
 
-        for x in range(Elem4.l_elem):
-            Elem4.jakob_odwr[x, 0, 0] = Elem4.jakob[x, 1, 1]
-            Elem4.jakob_odwr[x, 0, 1] = Elem4.jakob[x, 1, 0]
-            Elem4.jakob_odwr[x, 1, 0] = Elem4.jakob[x, 0, 1]
-            Elem4.jakob_odwr[x, 1, 1] = Elem4.jakob[x, 0, 0]
+    temp_hbc = MacierzHBC(element, no_integration_nodes, global_data.alfa)
+    hbc_matrices.append(temp_hbc.hbc_matrix)
 
-        for x in range(Elem4.l_elem):
-            Elem4.detJ[x] = Elem4.jakob[x, 0, 0] * Elem4.jakob[x, 1, 1] - Elem4.jakob[x, 0, 1] * Elem4.jakob[x, 1, 0]
-
-        print("\nJakobian:\n", Elem4.jakob)
+    temp_p_vector = WektorP(element, no_integration_nodes, global_data.alfa, global_data.tot)
+    p_vectors.append(temp_p_vector)
 
 
-    @staticmethod
-    def pochodne2():
-        for x in range(Elem4.l_elem):
-            for y in range(4):
-                Elem4.dNdX[x, y] = -(1 / Elem4.detJ[x]) * (
-                        Elem4.jakob_odwr[x, 0, 0] * Elem4.dNdE[x, y] + Elem4.jakob_odwr[x, 0, 1] * Elem4.dNdN[x, y])
-                Elem4.dNdY[x, y] = -(1 / Elem4.detJ[x]) * (
-                        Elem4.jakob_odwr[x, 1, 0] * Elem4.dNdE[x, y] + Elem4.jakob_odwr[x, 1, 1] * Elem4.dNdN[x, y])
-        print("dndx\n", Elem4.dNdX)
-        print("dndy\n", Elem4.dNdY)
 
-    @staticmethod
-    def macierzH():
-        H = np.zeros((4, 4, 4))
-        wsp_K = 30.0
-        for x in range(Elem4.l_elem):
-            for y in range(4):
-                for z in range(4):
-                    H[x, y, z] = wsp_K * (Elem4.dNdX[x, y] * Elem4.dNdX[x, z] + Elem4.dNdY[x, y] * Elem4.dNdY[x, z]) * Elem4.detJ[x]
+for h_matrix, hbc_matrix in zip(h_matrices, hbc_matrices):
+    # Create a new MatrixH instance
+    summed_matrix = MatrixH(h_matrix.element, no_integration_nodes, global_data.conductivity)
 
-        print("\nMacierze H przed sumowaniem:\n", H)
+    # Use the add_hbc_matrix method to add the hbc_matrix to the total_matrix
+    summed_matrix.add_hbc_matrix(hbc_matrix)
 
-        for x in range(Elem4.l_elem):
-            for y in range(4):
-                Elem4.suma_H[x, y] = 0
-                for z in range(4):
-                    Elem4.suma_H[x, y] += H[z, x, y]
+    # Append the summed matrix to the list
+    summed_matrices.append(summed_matrix)
 
-        print("\nMacierz H po sumowaniu:\n", Elem4.suma_H)
+grid.printGrid()
 
-# Przykład użycia klasy Elem4
 
-element1 = Elem4()
-file_path = './Test1_4_4.txt'  # Plik tekstowy z danymi
-# Wczytaj dane z pliku
-element1.read_data(file_path)
 
-# Sprawdzenie wczytanych danych
-print("Węzły:", Elem4.nodes)
-print("Elementy:", Elem4.elements)
-print("Warunki brzegowe:", Elem4.bc)
+print("\n Macierz H Globalna")
+h_glob = MacierzHGlobalna(global_data.elementsNo, global_data.nodesNo, summed_matrices)
+h_glob.print_global_matrix()
 
-# Obliczenia na podstawie wczytanych danych
-element1.pochodne()
-element1.jakobian()
-element1.pochodne2()
-element1.macierzH()
+print("\n Wektor P Globalny")
+p_glob = WektorPGlobalny(global_data.elementsNo, global_data.nodesNo, p_vectors)
+p_glob.print_global_vector()
+
+
+
